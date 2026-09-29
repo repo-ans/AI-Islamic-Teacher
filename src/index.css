@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Noto Sans Bengali", ui-sans-serif, system-ui, sans-serif;
+  --font-arabic: "Amiri", "Noto Naskh Arabic", serif;
+
+  --color-canvas: #ecedfa;
+  --color-ink: #111118;
+  --color-muted: #6e6e80;
+  --color-subtle: #a0a0b2;
+  --color-line: #e8e8f1;
+  --color-dash: #d6d6e4;
+  --color-soft: #f5f5fc;
+  --color-lilac: #e9e6ff;
+
+  --color-lime: #dff77e;
+  --color-lime-strong: #cbec4c;
+
+  --color-brand: #3b1fe3;
+  --color-brand-deep: #2c13c2;
+  --color-brand-soft: #eeebff;
+  --color-brand-dot: #c9c1ff;
+
+  --color-ok: #1f8f4e;
+  --color-ok-soft: #e5f6ea;
+  --color-warn: #b7791f;
+  --color-warn-soft: #fdf0d3;
+  --color-danger: #cf3b3b;
+  --color-danger-soft: #fdebeb;
+}
+
+html, body, #root { min-height: 100%; }
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.arabic { font-family: var(--font-arabic); direction: rtl; line-height: 2; }
+
+.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: var(--color-dash); border-radius: 999px; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.animate-rise { animation: rise .25s ease-out both; }
+
+@keyframes wave { 0%,100% { transform: scaleY(.35); } 50% { transform: scaleY(1); } }
+.wave-bar { animation: wave 1s ease-in-out infinite; transform-origin: bottom; }

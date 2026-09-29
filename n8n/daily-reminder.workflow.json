@@ -1,0 +1,83 @@
+{
+  "name": "Ilm AI — daily lesson reminder",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 18
+            }
+          ]
+        }
+      },
+      "id": "b8c0b1e2-0001-4c1a-9a01-000000000001",
+      "name": "Every day 18:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a1", "name": "supabaseUrl", "value": "https://YOUR-PROJECT.supabase.co", "type": "string" },
+            { "id": "a2", "name": "serviceRoleKey", "value": "YOUR-SERVICE-ROLE-KEY", "type": "string" },
+            { "id": "a3", "name": "appUrl", "value": "https://your-app.vercel.app", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b8c0b1e2-0002-4c1a-9a01-000000000002",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.supabaseUrl }}/rest/v1/rpc/students_due_reminder",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $json.serviceRoleKey }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $json.serviceRoleKey }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {}
+      },
+      "id": "b8c0b1e2-0003-4c1a-9a01-000000000003",
+      "name": "Students who haven't studied today",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "fromEmail": "Ilm AI <teacher@your-domain.com>",
+        "toEmail": "={{ $json.email }}",
+        "subject": "={{ $json.language === 'bn' ? 'আজকের পাঠ আপনার জন্য অপেক্ষা করছে 🌙' : 'Your lesson for today is waiting 🌙' }}",
+        "emailFormat": "html",
+        "html": "=<p>{{ $json.language === 'bn' ? 'আসসালামু আলাইকুম' : 'Assalamu alaikum' }} {{ ($json.full_name || '').split(' ')[0] }},</p><p>{{ $json.language === 'bn' ? 'আজকের পাঠ প্রস্তুত। মাত্র ১০ মিনিট — আপনার ধারাবাহিকতা বজায় রাখুন!' : 'Today\\'s lesson is ready. It only takes about 10 minutes — keep your learning streak going!' }}</p><p><a href=\"{{ $('Config').item.json.appUrl }}/today\">{{ $json.language === 'bn' ? 'পাঠ শুরু করুন' : 'Start today\\'s lesson' }}</a></p><p>— Noor, your AI teacher</p>",
+        "options": {}
+      },
+      "id": "b8c0b1e2-0004-4c1a-9a01-000000000004",
+      "name": "Send reminder email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [660, 0]
+    }
+  ],
+  "connections": {
+    "Every day 18:00": { "main": [[{ "node": "Config", "type": "main", "index": 0 }]] },
+    "Config": { "main": [[{ "node": "Students who haven't studied today", "type": "main", "index": 0 }]] },
+    "Students who haven't studied today": { "main": [[{ "node": "Send reminder email", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
