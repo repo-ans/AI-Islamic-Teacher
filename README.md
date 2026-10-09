@@ -59,7 +59,7 @@ Open http://localhost:5173 and create an account. With no Supabase keys, the app
    ```sql
    update profiles set role = 'admin' where email = 'you@example.com';
    ```
-6. **Auth → URL configuration:** set the Site URL to your app URL and add `http://localhost:5173/**` to the redirect URLs.
+6. **Auth → URL configuration:** set the Site URL to `https://islamicteacher.online`, then add these redirect URLs: `https://islamicteacher.online/**` and `http://localhost:5173/**`.
 7. **Google login:** Auth → Providers → Google. Add the OAuth client ID and secret from Google Cloud, and set the Google redirect URI to `https://<ref>.supabase.co/auth/v1/callback`.
 
 ### 2. AI teacher (OpenAI GPT-5)
@@ -80,22 +80,29 @@ The key stays on the server. The function:
 
 ### 3. Voice (ElevenLabs or Azure)
 
+Narration is generated **once per segment by an admin** and stored as an MP3, which every student replays for free, so the voice cost doesn't grow with the number of students.
+
 ```bash
 # ElevenLabs
-npx supabase secrets set TTS_PROVIDER=elevenlabs ELEVENLABS_API_KEY=... ELEVENLABS_VOICE_ID=...
-# — or Azure Speech
+npx supabase secrets set ELEVENLABS_API_KEY=...            # required
+npx supabase secrets set ELEVENLABS_VOICE_ID=...           # optional, default "George"
+npx supabase secrets set ELEVENLABS_MODEL=eleven_multilingual_v2   # optional (eleven_flash_v2_5 = half the credits)
+# — or Azure Speech (free tier: 500k characters / month)
 npx supabase secrets set TTS_PROVIDER=azure AZURE_SPEECH_KEY=... AZURE_SPEECH_REGION=eastus
 npx supabase functions deploy tts
 ```
 
-Then set `VITE_TTS_ENABLED=true` in `.env`.
+Then:
+1. Set `VITE_TTS_ENABLED=true` (locally in `.env` and on your hosting provider).
+2. Open **Curriculum admin → a lesson → "Narrate all"**.
 
-Narration priority for each segment:
-1. `audio_url` — a real recording, uploaded or pasted in the admin portal
-2. The AI voice
-3. The browser's built-in voice
+"Narrate all" skips segments that already have audio. After editing a segment's text, clear its audio URL and click **Generate audio** to re-record it.
 
-In the admin portal, **Generate audio** narrates a saved segment once and stores the MP3 in the `lesson-audio` bucket, so students don't trigger TTS costs.
+Students hear a segment in this order:
+1. The stored `audio_url`
+2. The browser's built-in voice, if the segment hasn't been narrated yet
+
+Short teacher replies always use the browser voice. Live per-student synthesis (`VITE_TTS_LIVE=true` + the `TTS_ALLOW_STUDENTS=true` secret) is off by default, because the provider bills every play. The `tts` function refuses non-admins unless it is switched on.
 
 ### 4. n8n — daily reminders
 

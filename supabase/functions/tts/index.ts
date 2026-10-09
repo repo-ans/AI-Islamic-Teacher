@@ -1,13 +1,14 @@
 /**
  * tts — lesson narration with ElevenLabs or Azure Speech.
  *
- * POST { text, lang }                → audio/mpeg stream (any signed-in user)
  * POST { text, lang, segment_id }    → admin only: stores the MP3 in the
  *                                       `lesson-audio` bucket, saves it on the
  *                                       segment, returns { audio_url }
+ * POST { text, lang }                → audio/mpeg stream (admins; students only
+ *                                       when TTS_ALLOW_STUDENTS=true)
  *
  * Secrets: TTS_PROVIDER (elevenlabs | azure), ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID,
- * ELEVENLABS_MODEL, AZURE_SPEECH_KEY, AZURE_SPEECH_REGION, AZURE_TTS_VOICE
+ * ELEVENLABS_MODEL, AZURE_SPEECH_KEY, AZURE_SPEECH_REGION, AZURE_TTS_VOICE, TTS_ALLOW_STUDENTS
  */
 import { adminClient, corsHeaders, HttpError, isAdmin, json, requireUser } from '../_shared/http.ts'
 
@@ -76,6 +77,13 @@ Deno.serve(async (req) => {
     const clean = (text ?? '').trim().slice(0, MAX_CHARS)
     if (!clean) throw new HttpError(400, 'text is required')
 
+    // Every call is billed by the provider, so only admins may synthesise unless live
+    // per-student narration is explicitly switched on (TTS_ALLOW_STUDENTS=true).
+    const userIsAdmin = await isAdmin(admin, user.id)
+    if (!userIsAdmin && (segment_id || Deno.env.get('TTS_ALLOW_STUDENTS') !== 'true')) {
+      throw new HttpError(403, 'Only admins can generate narration')
+    }
+
     const provider = Deno.env.get('TTS_PROVIDER') ?? (Deno.env.get('ELEVENLABS_API_KEY') ? 'elevenlabs' : 'azure')
     const audio = provider === 'elevenlabs' ? await elevenlabs(clean) : await azure(clean, lang)
 
@@ -85,7 +93,6 @@ Deno.serve(async (req) => {
       })
     }
 
-    if (!(await isAdmin(admin, user.id))) throw new HttpError(403, 'Only admins can store lesson audio')
     const path = `${segment_id}-${Date.now()}.mp3`
     const { error: upErr } = await admin.storage.from('lesson-audio').upload(path, audio, { contentType: 'audio/mpeg', upsert: true })
     if (upErr) throw new HttpError(500, upErr.message)

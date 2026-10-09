@@ -330,6 +330,7 @@ function LessonEditor({
   const [error, setError] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
   const [audioBusy, setAudioBusy] = useState<number | null>(null)
+  const [narrating, setNarrating] = useState<string | null>(null)
 
   useEffect(() => {
     if (!lessonId) return
@@ -366,6 +367,25 @@ function LessonEditor({
     } finally {
       setBusy(false)
     }
+  }
+
+  // Narrates every saved segment that has no audio yet (already-narrated ones are skipped, so nothing is billed twice).
+  const pendingAudio = draft.segments.filter((s) => s.id && s.content.trim() && !s.audio_url)
+  const narrateAll = async () => {
+    setError('')
+    let done = 0
+    for (const s of pendingAudio) {
+      setNarrating(`${done + 1}/${pendingAudio.length}`)
+      try {
+        const url = await generateSegmentAudio(s.id!, `${s.title}. ${s.content}`)
+        setDraft((d) => d && { ...d, segments: d.segments.map((x) => (x.id === s.id ? { ...x, audio_url: url } : x)) })
+        done++
+      } catch (e) {
+        setError(`Stopped after ${done} segment(s): ${errorMessage(e)}`)
+        break
+      }
+    }
+    setNarrating(null)
   }
 
   return (
@@ -423,6 +443,18 @@ function LessonEditor({
 
       <Card>
         <EditorHeader title="Recorded segments" subtitle="Played in order. Check-in points pause to ask the student if they understood.">
+          {canGenerateAudio && (
+            <Button
+              variant="lime"
+              onClick={narrateAll}
+              loading={!!narrating}
+              disabled={!pendingAudio.length}
+              title={pendingAudio.length ? 'Generate AI narration for saved segments without audio' : 'Every saved segment already has audio'}
+            >
+              <Volume2 className="size-4" />
+              {narrating ? `Narrating ${narrating}` : `Narrate all (${pendingAudio.length})`}
+            </Button>
+          )}
           <Button
             variant="outline"
             onClick={() =>

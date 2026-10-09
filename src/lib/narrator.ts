@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { SUPABASE_ANON_KEY, SUPABASE_URL, TTS_ENABLED } from './env'
+import { SUPABASE_ANON_KEY, SUPABASE_URL, TTS_LIVE } from './env'
 import { speechLang } from './levels'
 import { supabase } from './supabase'
 
@@ -20,7 +20,7 @@ export const speechSupported = !!synth
 const ttsCache = new Map<string, string>()
 
 async function fetchTts(item: PlayItem): Promise<string | null> {
-  if (!TTS_ENABLED || !supabase) return null
+  if (!TTS_LIVE || !supabase) return null
   const cached = ttsCache.get(item.key)
   if (cached) return cached
   try {

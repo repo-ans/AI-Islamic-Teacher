@@ -106,7 +106,7 @@ export function SettingsPage() {
             </div>
             <div className="flex justify-between">
               <dt className="text-muted">Narration</dt>
-              <dd>{TTS_ENABLED ? 'Premium AI voice' : 'Browser voice'}</dd>
+              <dd>{TTS_ENABLED ? 'AI voice (recorded)' : 'Browser voice'}</dd>
             </div>
           </dl>
         </Card>
