@@ -1,4 +1,4 @@
-import { ArrowLeft, Hand, Lock, Mic, Send, Target, Volume2, VolumeX } from 'lucide-react'
+import { ArrowLeft, Hand, Lock, Play, Send, Target, Volume2, VolumeX } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { ReferenceDrawer, ReferenceList } from '../../components/References'
@@ -14,6 +14,8 @@ import { useSpeechInput } from '../../lib/speech-input'
 import type { Course, LessonContent, MissedQuestion, Profile, Reference } from '../../lib/types'
 import type { ExplainMode } from '../../lib/ai'
 import { cn } from '../../lib/utils'
+import { ValidatedBadge } from '../../components/Validation'
+import { ListeningPanel, MicButton } from '../../components/Voice'
 import { MessageView, TeacherAvatar, Typing, Waveform } from './Messages'
 import { EXPLAIN_LABEL, useClassroom, type Classroom } from './useClassroom'
 
@@ -107,7 +109,7 @@ function Room(props: {
   onSaved: () => Promise<void>
 }) {
   const { content, course, profile } = props
-  const narrator = useNarrator()
+  const narrator = useNarrator(profile.gender === 'male' ? 'male' : 'female')
   const [voiceOn, setVoiceOn] = useState(() => {
     try {
       return speechSupported && localStorage.getItem(VOICE_KEY) !== 'off'
@@ -196,13 +198,27 @@ function Room(props: {
       <div className="mt-4 grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         {/* Conversation */}
         <section className="flex h-[calc(100vh-8.5rem)] min-h-[520px] flex-col rounded-[24px] bg-white">
-          <div ref={scroller} className="flex-1 space-y-4 overflow-y-auto p-4 scroll-thin sm:p-6">
-            {room.msgs.map((m) => (
-              <MessageView key={m.id} msg={m} content={content} room={room} narratorState={narrator.state} voiceOn={voiceOn} onRef={setOpenRef} />
-            ))}
-            {room.thinking && <Typing />}
-          </div>
-          <Composer room={room} language={profile.language} />
+          {room.hasStarted ? (
+            <>
+              <div ref={scroller} className="flex-1 space-y-4 overflow-y-auto p-4 scroll-thin sm:p-6">
+                {room.msgs.map((m) => (
+                  <MessageView key={m.id} msg={m} content={content} room={room} narratorState={narrator.state} voiceOn={voiceOn} onRef={setOpenRef} />
+                ))}
+                {room.thinking && <Typing />}
+              </div>
+              <Composer room={room} language={profile.language} narrator={narrator} />
+            </>
+          ) : (
+            <StartClass
+              title={content.lesson.title}
+              minutes={content.lesson.est_minutes}
+              segments={content.segments.length}
+              questions={content.questions.length}
+              voiceOn={voiceOn}
+              onToggleVoice={toggleVoice}
+              onStart={room.begin}
+            />
+          )}
         </section>
 
         {/* Side panel */}
@@ -247,6 +263,7 @@ function Room(props: {
                 ))}
             </div>
           </Card>
+          {content.lesson.validated_at && <ValidatedBadge lesson={content.lesson} className="bg-white" />}
           <Card className="p-5">
             <p className="text-sm font-semibold">Sources in this lesson</p>
             <p className="mb-3 text-xs text-muted">Quran, Hadith and scholarly references used.</p>
@@ -259,6 +276,39 @@ function Room(props: {
       </div>
 
       {openRef && <ReferenceDrawer reference={openRef} onClose={() => setOpenRef(null)} />}
+    </div>
+  )
+}
+
+function StartClass(props: {
+  title: string
+  minutes: number
+  segments: number
+  questions: number
+  voiceOn: boolean
+  onToggleVoice: () => void
+  onStart: () => void
+}) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+      <TeacherAvatar className="size-16" />
+      <p className="mt-4 text-sm text-muted">Your teacher Noor is ready</p>
+      <h2 className="mt-1 max-w-md text-2xl font-semibold tracking-tight">{props.title}</h2>
+      <p className="mt-2 text-sm text-muted">
+        ~{props.minutes} min · {props.segments} recorded parts{props.questions ? ` · ${props.questions}-question quiz` : ''}
+      </p>
+      <button
+        onClick={props.onStart}
+        className="mt-8 grid size-24 place-items-center rounded-full bg-ink text-lime shadow-xl shadow-ink/20 transition hover:scale-105 active:scale-95"
+        aria-label="Start class"
+      >
+        <Play className="ml-1 size-10 fill-current" />
+      </button>
+      <p className="mt-4 font-medium">Start class</p>
+      <button onClick={props.onToggleVoice} className="mt-6 inline-flex items-center gap-2 text-sm text-muted hover:text-ink">
+        {props.voiceOn ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
+        {props.voiceOn ? 'Teacher voice on — tap to read silently' : 'Voice off — tap to hear the teacher'}
+      </button>
     </div>
   )
 }
@@ -293,15 +343,15 @@ function TeacherCard({ room, narrator }: { room: Classroom; narrator: Narrator }
   )
 }
 
-function Composer({ room, language }: { room: Classroom; language: string }) {
+function Composer({ room, language, narrator }: { room: Classroom; language: string; narrator: Narrator }) {
   const [text, setText] = useState('')
-  const speech = useSpeechInput(language, (t, final) => {
-    setText(t)
-    if (final && t.trim()) {
-      room.sendText(t)
-      setText('')
-    }
-  })
+  // The mic stays on until the student taps stop; then the whole sentence is sent.
+  const speech = useSpeechInput(language, (t) => room.sendText(t))
+  // Pause the recording and the teacher's voice while the student speaks, so the mic only hears the student.
+  const quietTeacher = () => {
+    if (room.phase === 'segment') narrator.pause()
+    narrator.silenceLines()
+  }
   const placeholder = useMemo(() => {
     if (room.phase === 'quiz' && room.currentQuestion) {
       return room.currentQuestion.type === 'reflection' ? 'Write your reflection…' : 'Type your answer…'
@@ -335,42 +385,39 @@ function Composer({ room, language }: { room: Classroom; language: string }) {
       )}
       <div className="flex items-end gap-2">
         {room.phase === 'segment' && (
-          <Button variant="lime" onClick={room.raiseHand} title="Pause and ask a question" className="shrink-0">
+          <Button variant="lime" onClick={room.raiseHand} title="Pause and ask a question" className="h-14 shrink-0 rounded-2xl">
             <Hand className="size-4" /> <span className="hidden sm:inline">Raise hand</span>
           </Button>
         )}
-        <textarea
-          rows={1}
-          value={text}
-          disabled={!room.inputEnabled}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              submit()
-            }
-          }}
-          placeholder={room.inputEnabled ? placeholder : room.phase === 'quiz' ? 'Choose an option above' : ''}
-          className="max-h-32 min-h-11 flex-1 resize-none rounded-xl border border-line bg-soft px-3.5 py-2.5 text-[15px] outline-none placeholder:text-subtle focus:border-brand focus:bg-white disabled:opacity-60"
-        />
-        {speech.supported && (
-          <button
-            onClick={speech.listening ? speech.stop : speech.start}
+        {speech.listening ? (
+          <ListeningPanel speech={speech} />
+        ) : (
+          <textarea
+            rows={1}
+            value={text}
             disabled={!room.inputEnabled}
-            className={cn(
-              'grid size-11 shrink-0 place-items-center rounded-xl border transition disabled:opacity-40',
-              speech.listening ? 'animate-pulse border-danger bg-danger-soft text-danger' : 'border-line hover:bg-soft',
-            )}
-            aria-label={speech.listening ? 'Stop listening' : 'Speak'}
-          >
-            <Mic className="size-4" />
-          </button>
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                submit()
+              }
+            }}
+            placeholder={room.inputEnabled ? placeholder : room.phase === 'quiz' ? 'Choose an option above' : ''}
+            className="max-h-32 min-h-14 flex-1 resize-none rounded-2xl border border-line bg-soft px-4 py-3.5 text-[15px] outline-none placeholder:text-subtle focus:border-brand focus:bg-white disabled:opacity-60"
+          />
         )}
-        <Button onClick={submit} disabled={!room.inputEnabled || !text.trim()} className="size-11 shrink-0 px-0" aria-label="Send">
-          <Send className="size-4" />
-        </Button>
+        <MicButton speech={speech} disabled={!room.inputEnabled} onStart={quietTeacher} />
+        {!speech.listening && (
+          <Button onClick={submit} disabled={!room.inputEnabled || !text.trim()} className="size-14 shrink-0 rounded-2xl px-0" aria-label="Send">
+            <Send className="size-5" />
+          </Button>
+        )}
       </div>
-      {room.phase === 'segment' && <Pill className="mt-2">Recording in progress — tap “Raise hand” or type to ask a question</Pill>}
+      {speech.error && <p className="mt-2 text-sm text-danger">{speech.error}</p>}
+      {room.phase === 'segment' && !speech.listening && (
+        <Pill className="mt-2">Recording in progress — tap “Raise hand”, the mic, or type to ask a question</Pill>
+      )}
     </div>
   )
 }

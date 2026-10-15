@@ -17,6 +17,8 @@ import { OnboardingPage } from './pages/OnboardingPage'
 import { ProgressPage } from './pages/ProgressPage'
 import { RevisionPage } from './pages/RevisionPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { TeacherLessonPage } from './pages/TeacherLessonPage'
+import { TeacherPage } from './pages/TeacherPage'
 
 export function App() {
   return (
@@ -43,6 +45,8 @@ export function App() {
             <Route path="/progress" element={<ProgressPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/admin" element={<AdminOnly><AdminPage /></AdminOnly>} />
+            <Route path="/teach" element={<StaffOnly><TeacherPage /></StaffOnly>} />
+            <Route path="/teach/lesson/:lessonId" element={<StaffOnly><TeacherLessonPage /></StaffOnly>} />
           </Route>
         </Route>
       </Route>
@@ -81,6 +85,13 @@ function RequireOnboarded() {
 function AdminOnly({ children }: { children: ReactNode }) {
   const { profile } = useAuth()
   if (profile?.role !== 'admin') return <Navigate to="/" replace />
+  return <>{children}</>
+}
+
+/** Teacher portal: teachers validate; admins may look in. */
+function StaffOnly({ children }: { children: ReactNode }) {
+  const { profile } = useAuth()
+  if (profile?.role !== 'teacher' && profile?.role !== 'admin') return <Navigate to="/" replace />
   return <>{children}</>
 }
 

@@ -2,6 +2,7 @@ import { ArrowLeft, Check, ClipboardCheck, Clock, Lock, Play, Plus, RotateCcw } 
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { Button, Card, CourseBadge, Pill, ProgressBar, Tile } from '../components/ui'
+import { ValidatedBadge } from '../components/Validation'
 import { useAuth } from '../lib/auth'
 import { formatDay } from '../lib/clock'
 import { useData } from '../lib/data'
@@ -126,6 +127,7 @@ function LessonItem({ item, enrolled }: { item: LessonWithStatus; enrolled: bool
         <div className="min-w-0 flex-1">
           <p className="font-medium">{item.lesson.title}</p>
           <p className="text-sm text-muted">{item.lesson.description}</p>
+          <ValidatedBadge lesson={item.lesson} compact className="mt-1" />
         </div>
         <span className="flex items-center gap-1.5 text-xs text-muted">
           <Clock className="size-3.5" /> {item.lesson.est_minutes} min

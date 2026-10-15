@@ -3,7 +3,9 @@ import type {
   Catalog,
   Course,
   DraftLesson,
+  CatalogAudience,
   Lesson,
+  LessonReview,
   LearnerState,
   LessonContent,
   MissedQuestion,
@@ -33,7 +35,7 @@ export interface Repo {
   updateProfile(userId: string, patch: Partial<Omit<Profile, 'id' | 'role' | 'created_at'>>): Promise<Profile>
 
   // ── curriculum
-  getCatalog(includeUnpublished?: boolean): Promise<Catalog>
+  getCatalog(audience?: CatalogAudience): Promise<Catalog>
   getLessonContent(lessonId: string): Promise<LessonContent | null>
   getModuleQuestions(moduleId: string): Promise<QuizQuestion[]>
 
@@ -57,4 +59,14 @@ export interface Repo {
   saveLesson(d: DraftLesson): Promise<string>
   deleteLesson(id: string): Promise<void>
   setSegmentAudio(segmentId: string, audioUrl: string | null): Promise<void>
+
+  // ── teacher validation
+  /** Validates a submitted lesson. Fails if another teacher already validated it. */
+  validateLesson(lessonId: string): Promise<void>
+  listReviews(lessonId?: string): Promise<LessonReview[]>
+  requestImprovement(lessonId: string, location: string, comment: string): Promise<void>
+  resolveReview(reviewId: string): Promise<void>
+  /** Admin: give an existing account a role (by email). */
+  setUserRole(email: string, role: Profile['role']): Promise<Profile>
+  listStaff(): Promise<Profile[]>
 }

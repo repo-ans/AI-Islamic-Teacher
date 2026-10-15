@@ -16,7 +16,7 @@ import { ai, learnerCtx, type ExplainMode, type LessonCtx, type QuizItem, type T
 import { dayKey } from '../../lib/clock'
 import type { Narrator } from '../../lib/narrator'
 import { repo } from '../../lib/repo'
-import { linesLang, pick, teacherLines } from '../../lib/teacher-lines'
+import { linesLang, pick, quizLine, resultLine, segmentSpeech, teacherLines } from '../../lib/teacher-lines'
 import type { Course, LessonContent, MissedQuestion, Profile, QuestionType, Reference } from '../../lib/types'
 import { normalize, uid } from '../../lib/utils'
 
@@ -221,7 +221,8 @@ export function useClassroom(opts: Options) {
   // ───────────── greeting & review ─────────────
   const start = () => {
     setPhase('greeting')
-    void say(`${L.greeting(learner.name.split(' ')[0] || learner.name)} ${L.askReady(lesson.title)}`)
+    // Two lines: the personal greeting, then a name-free question whose audio is cached for everyone.
+    void say(L.greeting(learner.name.split(' ')[0] || learner.name)).then(() => say(L.askReady(lesson.title)))
     setChips([chip.ready, chip.notReady])
   }
 
@@ -278,7 +279,7 @@ export function useClassroom(opts: Options) {
     }
     if (voiceRef.current) {
       const s = segments[i]
-      void narrator.play({ key: s.id, text: `${s.title}. ${s.content}`, audioUrl: s.audio_url, lang: 'en' }, () => onSegmentEnd(i))
+      void narrator.play({ key: s.id, text: segmentSpeech(s), audioUrl: s.audio_url, lang: 'en' }, () => onSegmentEnd(i))
     }
   }
 
@@ -321,7 +322,7 @@ export function useClassroom(opts: Options) {
     else {
       const i = segRef.current
       const s = segments[i]
-      void narrator.play({ key: s.id, text: `${s.title}. ${s.content}`, audioUrl: s.audio_url, lang: 'en' }, () => onSegmentEnd(i))
+      void narrator.play({ key: s.id, text: segmentSpeech(s), audioUrl: s.audio_url, lang: 'en' }, () => onSegmentEnd(i))
     }
   }
 
@@ -385,7 +386,7 @@ export function useClassroom(opts: Options) {
     push({ id: uid(), kind: 'quiz', index: i })
     if (voiceRef.current) {
       const q = questions[i]
-      void narrator.speakLine(`${L.quizQ(i + 1, questions.length)}. ${q.prompt}`, 'en')
+      void narrator.speakLine(quizLine(i, questions.length, q.prompt), 'en')
     }
   }
 
@@ -456,8 +457,7 @@ export function useClassroom(opts: Options) {
         improvement_areas: ev.improvement_areas,
         recommendations: ev.recommendations,
       })
-      const p = total ? Math.round((score / total) * 100) : 100
-      await say(`${L.result(score, total)} ${L.praise(p)}`)
+      await say(resultLine(L, score, total))
     }
 
     await persist(graded, score, total, summary)
@@ -705,7 +705,7 @@ export function useClassroom(opts: Options) {
       setChips([])
       const i = segRef.current
       const s = segments[i]
-      if (voiceRef.current) void narrator.play({ key: s.id, text: `${s.title}. ${s.content}`, audioUrl: s.audio_url, lang: 'en' }, () => onSegmentEnd(i))
+      if (voiceRef.current) void narrator.play({ key: s.id, text: segmentSpeech(s), audioUrl: s.audio_url, lang: 'en' }, () => onSegmentEnd(i))
     },
   }
 
@@ -717,12 +717,16 @@ export function useClassroom(opts: Options) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.voiceOn])
 
-  useEffect(() => {
+  // The class waits for the student to press "Start class" — nothing plays on page load,
+  // and the tap also lets the browser play the teacher's voice.
+  const [hasStarted, setHasStarted] = useState(false)
+  const begin = () => {
     if (started.current) return
     started.current = true
+    startedAt.current = Date.now()
+    setHasStarted(true)
     start()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }
 
   // Count partial study time toward today's streak if the student leaves early.
   useEffect(
@@ -744,6 +748,8 @@ export function useClassroom(opts: Options) {
     !(phase === 'quiz' && currentQuestion && (currentQuestion.type === 'mcq' || currentQuestion.type === 'true_false'))
 
   return {
+    hasStarted,
+    begin,
     msgs,
     chips,
     phase,

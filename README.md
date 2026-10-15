@@ -118,6 +118,22 @@ Import the repo on Vercel and add the `VITE_*` env vars. `vercel.json` already r
 
 ---
 
+
+## Teacher validation
+
+AI-drafted lessons reach students **only after a teacher validates them**.
+
+| Role | Can |
+|---|---|
+| **Admin** | Create, edit or AI-draft lessons; switch on **"Submitted for teacher review"**; resolve improvement requests; give accounts the Teacher/Admin role (Curriculum admin → *Teachers & admins*, by email after they sign up) |
+| **Teacher** | Open **Lesson review**, read the full lesson (parts, images, sources, quiz answers), **Validate** it, or **Request improvement** (where + what to change); set a title/qualification in Settings |
+| **Student** | Sees validated lessons only, with *"✓ Validated by Name · title"* on the course page and in the classroom |
+
+The rules are enforced in the database:
+- **One validation per lesson.** The first teacher wins, and any later attempt is refused.
+- **Validation can't be faked.** It's only possible through `validate_lesson()`.
+- **Editing a validated lesson clears its validation,** so it goes back to the review queue.
+
 ## Project structure
 
 ```

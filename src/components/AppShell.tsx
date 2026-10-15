@@ -1,4 +1,5 @@
 import {
+  BadgeCheck,
   BookOpen,
   CalendarDays,
   ChartColumn,
@@ -265,6 +266,8 @@ function Sidebar({ collapsed, onToggle, onClose }: { collapsed: boolean; onToggl
     { to: '/revision', label: 'Revision', icon: <RotateCcw className="size-4" />, badge: weak || undefined },
     { to: '/progress', label: 'Progress', icon: <ChartColumn className="size-4" /> },
   ]
+  if (profile?.role === 'teacher' || profile?.role === 'admin')
+    nav.push({ to: '/teach', label: 'Lesson review', icon: <BadgeCheck className="size-4" /> })
   if (profile?.role === 'admin') nav.push({ to: '/admin', label: 'Curriculum admin', icon: <Shield className="size-4" /> })
 
   return (

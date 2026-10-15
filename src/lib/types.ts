@@ -1,5 +1,5 @@
 export type Level = 'child' | 'teen' | 'adult' | 'new_muslim' | 'non_muslim'
-export type Role = 'student' | 'admin'
+export type Role = 'student' | 'teacher' | 'admin'
 
 export interface Profile {
   id: string
@@ -7,9 +7,13 @@ export interface Profile {
   full_name: string
   age: number | null
   level: Level | null
+  /** Decides the teacher's voice: girls hear the female teacher, boys the male teacher. */
+  gender?: 'female' | 'male' | null
   language: string
   country: string | null
   role: Role
+  /** Teachers only: qualification shown to students, e.g. "Alim, Darul Uloom Dhaka". */
+  teacher_title?: string | null
   onboarded: boolean
   created_at: string
 }
@@ -44,8 +48,30 @@ export interface Lesson {
   objectives: string[]
   est_minutes: number
   order_index: number
+  /** Submitted by an admin for teacher review. */
   published: boolean
+  /** Set once, by the teacher who validated the lesson — students only see validated lessons. */
+  validated_at?: string | null
+  validated_by?: string | null
+  validated_by_name?: string | null
+  validated_by_title?: string | null
 }
+
+/** A teacher's improvement request on a lesson. */
+export interface LessonReview {
+  id: string
+  lesson_id: string
+  teacher_id: string | null
+  teacher_name: string
+  location: string
+  comment: string
+  status: 'open' | 'resolved'
+  created_at: string
+  resolved_at: string | null
+}
+
+/** Whose view of the curriculum: students see validated lessons, teachers everything submitted, admins all. */
+export type CatalogAudience = 'student' | 'teacher' | 'admin'
 
 export type SegmentKind = 'intro' | 'teaching' | 'example' | 'story' | 'summary'
 
@@ -57,6 +83,8 @@ export interface Segment {
   title: string
   content: string
   audio_url: string | null
+  /** Illustration shown with the segment (no people or faces). */
+  image_url?: string | null
   checkpoint: boolean
 }
 

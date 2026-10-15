@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { SUPABASE_ANON_KEY, SUPABASE_URL, TTS_LIVE } from './env'
+import { SUPABASE_ANON_KEY, SUPABASE_URL, TTS_ENABLED } from './env'
 import { speechLang } from './levels'
 import { supabase } from './supabase'
 
@@ -15,33 +15,55 @@ export interface PlayItem {
 }
 
 const synth = typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null
-export const speechSupported = !!synth
+export const speechSupported = !!synth || TTS_ENABLED
 
-const ttsCache = new Map<string, string>()
+const urlCache = new Map<string, Promise<string | null>>()
 
-async function fetchTts(item: PlayItem): Promise<string | null> {
-  if (!TTS_LIVE || !supabase) return null
-  const cached = ttsCache.get(item.key)
-  if (cached) return cached
-  try {
-    const { data } = await supabase.auth.getSession()
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/tts`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${data.session?.access_token ?? SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({ text: item.text, lang: item.lang ?? 'en' }),
-    })
-    if (!res.ok) throw new Error(`TTS ${res.status}`)
-    const url = URL.createObjectURL(await res.blob())
-    ttsCache.set(item.key, url)
-    return url
-  } catch (e) {
-    console.warn('[tts] falling back to browser voice', e)
-    return null
-  }
+/** Strips emoji so they aren't read aloud (and don't split the cache). */
+const speakable = (text: string) =>
+  text
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/**
+ * Gets an MP3 URL for `text` from the `tts` function. The server caches every
+ * sentence, so lines any student has heard before cost nothing.
+ */
+export type TeacherGender = 'female' | 'male'
+
+export function fetchTts(text: string, lang: string, gender: TeacherGender = 'female'): Promise<string | null> {
+  const client = supabase
+  if (!TTS_ENABLED || !client) return Promise.resolve(null)
+  const clean = speakable(text)
+  if (!clean) return Promise.resolve(null)
+  const key = `${gender}|${lang}|${clean}`
+  const hit = urlCache.get(key)
+  if (hit) return hit
+
+  const p = (async () => {
+    try {
+      const { data } = await client.auth.getSession()
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/tts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${data.session?.access_token ?? SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ text: clean, lang, gender }),
+      })
+      const body = (await res.json().catch(() => ({}))) as { audio_url?: string; error?: string }
+      if (!res.ok || !body.audio_url) throw new Error(body.error || `TTS ${res.status}`)
+      return body.audio_url
+    } catch (e) {
+      console.warn('[tts] falling back to browser voice', e)
+      urlCache.delete(key)
+      return null
+    }
+  })()
+  urlCache.set(key, p)
+  return p
 }
 
 function pickVoice(lang: string): SpeechSynthesisVoice | undefined {
@@ -72,7 +94,10 @@ function chunk(text: string, max = 220): string[] {
   return out
 }
 
-export function useNarrator() {
+/** `gender` picks the teacher's voice to match the student (female → Jessica, male → Will). */
+export function useNarrator(gender: TeacherGender = 'female') {
+  const genderRef = useRef(gender)
+  genderRef.current = gender
   const [state, setState] = useState<NarratorState>('idle')
   const [rate, setRateState] = useState(1)
   const [currentKey, setCurrentKey] = useState<string | null>(null)
@@ -83,6 +108,9 @@ export function useNarrator() {
   const speech = useRef<{ chunks: string[]; index: number; lang: string } | null>(null)
   const paused = useRef(false)
   const onEnd = useRef<(() => void) | null>(null)
+  // Teacher lines play on their own element so they never disturb a paused segment.
+  const lineAudio = useRef<HTMLAudioElement | null>(null)
+  const lineToken = useRef(0)
   // Some engines (e.g. no installed voices) never fire onend — advance anyway.
   const watchdog = useRef<ReturnType<typeof setTimeout> | null>(null)
   const clearWatchdog = () => {
@@ -96,6 +124,13 @@ export function useNarrator() {
     const handler = () => synth?.getVoices()
     synth?.addEventListener?.('voiceschanged', handler)
     return () => synth?.removeEventListener?.('voiceschanged', handler)
+  }, [])
+
+  const stopLine = useCallback(() => {
+    lineToken.current++
+    const el = lineAudio.current
+    lineAudio.current = null
+    if (el) el.pause() // fires onpause → resolves the pending speakLine
   }, [])
 
   const finish = useCallback((my: number) => {
@@ -138,6 +173,7 @@ export function useNarrator() {
 
   const stop = useCallback(() => {
     clearWatchdog()
+    stopLine()
     token.current++
     paused.current = false
     onEnd.current = null
@@ -150,7 +186,7 @@ export function useNarrator() {
     synth?.cancel()
     setState('idle')
     setCurrentKey(null)
-  }, [])
+  }, [stopLine])
 
   const speakText = useCallback(
     (text: string, lang: string, my: number) => {
@@ -166,7 +202,7 @@ export function useNarrator() {
     [finish, speakNext],
   )
 
-  /** Plays a narration item; `done` fires when it finishes naturally. */
+  /** Plays a lesson segment; `done` fires when it finishes naturally. */
   const play = useCallback(
     async (item: PlayItem, done?: () => void) => {
       stop()
@@ -175,7 +211,7 @@ export function useNarrator() {
       setCurrentKey(item.key)
       setState('loading')
 
-      const src = item.audioUrl || (await fetchTts(item))
+      const src = item.audioUrl || (await fetchTts(item.text, item.lang ?? 'en', genderRef.current))
       if (my !== token.current) return
 
       if (src) {
@@ -192,7 +228,7 @@ export function useNarrator() {
           audio.current = null
         }
       }
-      speakText(item.text, item.lang ?? 'en', my)
+      speakText(speakable(item.text), item.lang ?? 'en', my)
     },
     [finish, speakText, stop],
   )
@@ -209,6 +245,7 @@ export function useNarrator() {
 
   const resume = useCallback(() => {
     const my = token.current
+    stopLine()
     if (audio.current) {
       void audio.current.play()
       setState('playing')
@@ -217,23 +254,21 @@ export function useNarrator() {
       setState('playing')
       speakNext(my)
     }
-  }, [speakNext])
+  }, [speakNext, stopLine])
 
   const setRate = useCallback((r: number) => {
     rateRef.current = r
     setRateState(r)
     if (audio.current) audio.current.playbackRate = r
+    if (lineAudio.current) lineAudio.current.playbackRate = r
   }, [])
 
-  /**
-   * Short teacher line through the browser voice; never interrupts a playing
-   * segment. Resolves when the line has been spoken (or skipped).
-   */
-  const speakLine = useCallback((text: string, lang: string): Promise<void> => {
-    if (!synth || (audio.current && !audio.current.paused) || (speech.current && !paused.current)) return Promise.resolve()
+  /** Browser-voice fallback for a teacher line. */
+  const speakLineBrowser = useCallback((text: string, lang: string): Promise<void> => {
+    if (!synth) return Promise.resolve()
     synth.cancel()
     return new Promise<void>((resolve) => {
-      const u = new SpeechSynthesisUtterance(text.replace(/[\u{1F300}-\u{1FAFF}]/gu, ''))
+      const u = new SpeechSynthesisUtterance(text)
       u.lang = speechLang(lang)
       const voice = pickVoice(lang)
       if (voice) u.voice = voice
@@ -250,9 +285,43 @@ export function useNarrator() {
     })
   }, [])
 
+  /**
+   * Speaks a teacher line in the teacher's voice (ElevenLabs when enabled);
+   * never interrupts a playing segment. Resolves when the line has finished.
+   */
+  const speakLine = useCallback(
+    async (text: string, lang: string): Promise<void> => {
+      const segmentPlaying = () => !!((audio.current && !audio.current.paused) || (speech.current && !paused.current))
+      if (segmentPlaying()) return
+      stopLine()
+      const my = lineToken.current
+      const clean = speakable(text)
+      if (!clean) return
+      const url = await fetchTts(clean, lang, genderRef.current)
+      if (my !== lineToken.current || segmentPlaying()) return
+      if (!url) return speakLineBrowser(clean, lang)
+
+      await new Promise<void>((resolve) => {
+        const el = new Audio(url)
+        el.playbackRate = rateRef.current
+        lineAudio.current = el
+        const done = () => {
+          if (lineAudio.current === el) lineAudio.current = null
+          resolve()
+        }
+        el.onended = done
+        el.onerror = done
+        el.onpause = done // stopped by stopLine() or a newer line
+        el.play().catch(done)
+      })
+    },
+    [speakLineBrowser, stopLine],
+  )
+
   const silenceLines = useCallback(() => {
+    stopLine()
     if (!speech.current || paused.current) synth?.cancel()
-  }, [])
+  }, [stopLine])
 
   useEffect(() => () => stop(), [stop])
 

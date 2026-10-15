@@ -1,6 +1,7 @@
-import { MessageCircleQuestion, Mic, Send, Sparkles, WifiOff } from 'lucide-react'
+import { MessageCircleQuestion, Send, Sparkles, WifiOff } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { ReferenceChips, ReferenceDrawer } from '../components/References'
+import { ListeningPanel, MicButton } from '../components/Voice'
 import { Button, Card, EmptyState, Pill } from '../components/ui'
 import { ai, learnerCtx, type Turn } from '../lib/ai'
 import { useAuth } from '../lib/auth'
@@ -9,7 +10,7 @@ import { useData } from '../lib/data'
 import { repo } from '../lib/repo'
 import { useSpeechInput } from '../lib/speech-input'
 import type { Reference } from '../lib/types'
-import { cn, uid } from '../lib/utils'
+import { uid } from '../lib/utils'
 import { TeacherAvatar, Typing } from './classroom/Messages'
 
 interface ChatMsg {
@@ -37,10 +38,8 @@ export function AskPage() {
   const [openRef, setOpenRef] = useState<Reference | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
 
-  const speech = useSpeechInput(profile?.language ?? 'en', (t, final) => {
-    setText(t)
-    if (final && t.trim()) void ask(t)
-  })
+  // The mic stays on until the student taps stop; then the whole question is sent.
+  const speech = useSpeechInput(profile?.language ?? 'en', (t) => void ask(t))
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' })
@@ -128,28 +127,26 @@ export function AskPage() {
             e.preventDefault()
             void ask(text)
           }}
-          className="flex gap-2 border-t border-dashed border-dash p-4"
+          className="flex items-center gap-2 border-t border-dashed border-dash p-4"
         >
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Ask anything about Islam…"
-            className="h-11 flex-1 rounded-xl border border-line bg-soft px-3.5 text-[15px] outline-none focus:border-brand focus:bg-white"
-          />
-          {speech.supported && (
-            <button
-              type="button"
-              onClick={speech.listening ? speech.stop : speech.start}
-              className={cn('grid size-11 place-items-center rounded-xl border', speech.listening ? 'animate-pulse border-danger bg-danger-soft text-danger' : 'border-line hover:bg-soft')}
-              aria-label="Speak your question"
-            >
-              <Mic className="size-4" />
-            </button>
+          {speech.listening ? (
+            <ListeningPanel speech={speech} />
+          ) : (
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Ask anything about Islam — or tap the mic and say it"
+              className="h-14 flex-1 rounded-2xl border border-line bg-soft px-4 text-[15px] outline-none focus:border-brand focus:bg-white"
+            />
           )}
-          <Button type="submit" className="size-11 px-0" disabled={!text.trim() || thinking} aria-label="Send">
-            <Send className="size-4" />
-          </Button>
+          <MicButton speech={speech} disabled={thinking} />
+          {!speech.listening && (
+            <Button type="submit" className="size-14 rounded-2xl px-0" disabled={!text.trim() || thinking} aria-label="Send">
+              <Send className="size-5" />
+            </Button>
+          )}
         </form>
+        {speech.error && <p className="px-4 pb-3 text-sm text-danger">{speech.error}</p>}
       </section>
 
       <Card className="h-fit">

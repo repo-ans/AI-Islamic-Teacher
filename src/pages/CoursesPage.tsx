@@ -43,6 +43,9 @@ export function CoursesPage() {
                 </div>
                 <h3 className="mt-4 text-lg font-semibold">{c.title}</h3>
                 <p className="mt-1 flex-1 text-sm text-muted">{c.description}</p>
+                {lessons.length === 0 && (
+                  <p className="mt-3 rounded-xl bg-soft p-2.5 text-xs text-muted">Lessons are being checked by our teachers — coming soon, in shaa Allah.</p>
+                )}
                 <div className="mt-4 flex items-center gap-4 text-xs text-muted">
                   <span className="flex items-center gap-1.5">
                     <BookOpen className="size-3.5" /> {lessons.length} lessons

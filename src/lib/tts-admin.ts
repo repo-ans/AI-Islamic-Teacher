@@ -2,6 +2,22 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL, TTS_ENABLED } from './env'
 import { supabase } from './supabase'
 
 export const canGenerateAudio = TTS_ENABLED
+export const canGenerateImages = !!supabase
+
+/** Admin only: creates an illustration (no people/faces) for a saved segment and stores it on the segment. */
+export async function generateSegmentImage(segmentId: string): Promise<string> {
+  if (!supabase) throw new Error('Image generation needs Supabase')
+  const { data, error } = await supabase.functions.invoke('illustrate', { body: { segment_id: segmentId } })
+  const body = (data ?? {}) as { image_url?: string; error?: string }
+  if (error || !body.image_url) {
+    let message = body.error
+    // Surface the function's own error message instead of the generic "non-2xx" one.
+    const ctx = (error as { context?: Response } | null)?.context
+    if (!message && ctx?.json) message = ((await ctx.json().catch(() => ({}))) as { error?: string }).error
+    throw new Error(message || error?.message || 'Image generation failed')
+  }
+  return body.image_url
+}
 
 /**
  * Admin only: narrates a saved segment with ElevenLabs/Azure, stores the MP3 in

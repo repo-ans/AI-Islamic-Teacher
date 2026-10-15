@@ -165,4 +165,45 @@ export const teacherLines = (lang: string): TeacherLines => LINES[lang] ?? en
 /** Language the scripted lines are actually written in (for choosing a voice). */
 export const linesLang = (lang: string) => (LINES[lang] ? lang : 'en')
 
+/** Spoken quiz question (questions are authored in English). */
+export const quizLine = (i: number, total: number, prompt: string) => `Question ${i + 1} of ${total}. ${prompt}`
+
+/** The spoken quiz result line, exactly as the classroom says it. */
+export const resultLine = (L: TeacherLines, score: number, total: number) =>
+  `${L.result(score, total)} ${L.praise(total ? Math.round((score / total) * 100) : 100)}`
+
+/**
+ * Every fixed sentence the teacher can say for the given lessons, per language
+ * — used to pre-record the teacher's voice so students never wait for it.
+ */
+export function teacherLineScript(
+  lessons: Array<{
+    title: string
+    questions: Array<{ type: string; prompt: string }>
+    segments?: Array<{ title: string; content: string; audio_url?: string | null }>
+  }>,
+): Array<{ text: string; lang: string }> {
+  const out = new Map<string, { text: string; lang: string }>()
+  const add = (text: string, lang: string) => out.set(`${lang}|${text}`, { text, lang })
+
+  for (const [lang, L] of Object.entries(LINES)) {
+    for (const t of [
+      L.greetReply, L.notReady, L.startLesson, L.reviewCheck, ...L.checkpoints, L.confusedIntro, L.askGoAhead,
+      L.continueQ, L.resumeQ, L.lessonEnd, L.beforeQuiz, L.quizIntro, L.quizWait, L.grading, L.otherQuestions, L.finish,
+    ]) add(t, lang)
+    for (const l of lessons) {
+      add(L.askReady(l.title), lang)
+      const total = l.questions.filter((q) => q.type !== 'reflection').length
+      for (let s = 0; s <= total; s++) add(resultLine(L, s, total), lang)
+    }
+  }
+  for (const l of lessons) l.questions.forEach((q, i) => add(quizLine(i, l.questions.length, q.prompt), 'en'))
+  // Recorded lesson parts — spoken exactly as the classroom plays them (skipped if a human recording exists).
+  for (const l of lessons) for (const s of l.segments ?? []) if (!s.audio_url) add(segmentSpeech(s), 'en')
+  return [...out.values()]
+}
+
 export const pick = <T,>(arr: T[], i: number) => arr[i % arr.length]
+
+/** The text the classroom speaks for a lesson segment (must match for the voice cache to hit). */
+export const segmentSpeech = (s: { title: string; content: string }) => `${s.title}. ${s.content}`

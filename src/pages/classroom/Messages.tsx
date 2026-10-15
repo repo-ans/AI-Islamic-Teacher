@@ -99,8 +99,20 @@ export function MessageView({ msg, content, room, narratorState, voiceOn, onRef 
               </Pill>
             </div>
           </div>
-          <h3 className="mt-3 font-semibold">{seg.title}</h3>
-          <p className={cn('mt-1.5 text-[15px] leading-relaxed', active ? 'text-ink' : 'text-muted')}>{seg.content}</p>
+          <div className={cn('mt-3', seg.image_url && 'flex flex-col-reverse gap-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(200px,38%)] md:items-start')}>
+            <div className="min-w-0">
+              <h3 className="font-semibold">{seg.title}</h3>
+              <p className={cn('mt-1.5 text-[15px] leading-relaxed', active ? 'text-ink' : 'text-muted')}>{seg.content}</p>
+            </div>
+            {seg.image_url && (
+              <img
+                src={seg.image_url}
+                alt={`Illustration: ${seg.title}`}
+                loading="lazy"
+                className={cn('aspect-3/2 w-full rounded-xl bg-soft object-cover transition', !active && 'opacity-70 saturate-75')}
+              />
+            )}
+          </div>
 
           {active && (
             <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-dashed border-dash pt-4">

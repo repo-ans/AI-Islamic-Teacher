@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, BookOpen, FileText, FolderOpen, Plus, Save, Trash2, Volume2, WandSparkles, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, BadgeCheck, BookOpen, FileText, ImagePlus, FolderOpen, Plus, Save, Trash2, Volume2, WandSparkles, X } from 'lucide-react'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Modal } from '../components/Modal'
 import { Button, Card, CourseBadge, ErrorNote, Input, Label, PageLoader, Pill, Select, Textarea } from '../components/ui'
@@ -7,8 +7,11 @@ import { useData } from '../lib/data'
 import { LEVELS } from '../lib/levels'
 import { orderedLessons } from '../lib/progress'
 import { repo } from '../lib/repo'
-import { canGenerateAudio, generateSegmentAudio } from '../lib/tts-admin'
-import type { Catalog, Course, CourseColor, DraftLesson, Module, QuestionType, SegmentKind, SourceType } from '../lib/types'
+import { canGenerateAudio, canGenerateImages, generateSegmentImage } from '../lib/tts-admin'
+import { fetchTts } from '../lib/narrator'
+import { teacherLineScript } from '../lib/teacher-lines'
+import type { Catalog, Course, CourseColor, DraftLesson, Lesson, LessonReview, Module, Profile, QuestionType, SegmentKind, SourceType } from '../lib/types'
+import { ReviewList, ValidatedBadge } from '../components/Validation'
 import { cn, errorMessage } from '../lib/utils'
 
 type Selection =
@@ -23,7 +26,7 @@ export function AdminPage() {
   const [sel, setSel] = useState<Selection>(null)
 
   const reload = useCallback(async () => {
-    setCatalog(await repo.getCatalog(true))
+    setCatalog(await repo.getCatalog('admin'))
     void refreshLearner()
   }, [refreshLearner])
 
@@ -45,6 +48,7 @@ export function AdminPage() {
             <Plus className="size-3.5" /> Course
           </Button>
         </div>
+        {canGenerateAudio && <VoicePrewarm catalog={catalog} />}
         <ul className="space-y-3">
           {catalog.courses.map((c) => (
             <li key={c.id}>
@@ -73,7 +77,13 @@ export function AdminPage() {
                               >
                                 <FileText className="size-3.5 text-muted" />
                                 <span className="flex-1 truncate text-[13px]">{l.title}</span>
-                                {!l.published && <span className="size-1.5 rounded-full bg-warn" title="Draft" />}
+                                {!l.published ? (
+                                  <span className="size-1.5 rounded-full bg-subtle" title="Draft" />
+                                ) : l.validated_at ? (
+                                  <BadgeCheck className={cn('size-3.5 shrink-0', sel?.kind === 'lesson' && sel.id === l.id ? 'text-lime' : 'text-ok')} aria-label="Validated" />
+                                ) : (
+                                  <span className="size-1.5 rounded-full bg-warn" title="Waiting for teacher validation" />
+                                )}
                               </TreeButton>
                             </li>
                           ))}
@@ -100,6 +110,7 @@ export function AdminPage() {
             </li>
           ))}
         </ul>
+        <TeamCard />
       </Card>
 
       <div className="min-w-0">
@@ -137,6 +148,55 @@ export function AdminPage() {
           />
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Records every fixed teacher sentence (check-ins, quiz questions, results…)
+ * into the server cache, so students hear the teacher instantly. Already
+ * recorded lines are free — the server returns the cached file.
+ */
+function VoicePrewarm({ catalog }: { catalog: Catalog }) {
+  const [progress, setProgress] = useState<string | null>(null)
+  const [result, setResult] = useState('')
+
+  const run = async () => {
+    setResult('')
+    setProgress('Preparing…')
+    const lessons = await Promise.all(
+      catalog.lessons.filter((l) => l.published).map(async (l) => {
+        const c = await repo.getLessonContent(l.id)
+        return { title: l.title, questions: c?.questions ?? [], segments: c?.segments ?? [] }
+      }),
+    )
+    // Every sentence in both teacher voices: girls hear Jessica, boys hear Will.
+    const lines = teacherLineScript(lessons).flatMap((l) => (['female', 'male'] as const).map((gender) => ({ ...l, gender })))
+    let done = 0
+    let failed = 0
+    const queue = [...lines]
+    const worker = async () => {
+      for (let item = queue.shift(); item; item = queue.shift()) {
+        if (!(await fetchTts(item.text, item.lang, item.gender))) failed++
+        setProgress(`${++done}/${lines.length}`)
+      }
+    }
+    await Promise.all([worker(), worker(), worker()])
+    setProgress(null)
+    setResult(failed ? `${lines.length - failed} recorded, ${failed} failed — run again to retry.` : `All ${lines.length} clips are ready in both voices.`)
+  }
+
+  return (
+    <div className="mb-4 rounded-2xl bg-lilac/60 p-3">
+      <p className="text-sm font-medium">Teacher voice</p>
+      <p className="mt-0.5 text-xs text-muted">
+        Records every lesson part, greeting, check-in, quiz question and result in both voices (Jessica for girls, Will for boys).
+        Already-recorded clips are free — run it again after editing lessons.
+      </p>
+      <Button size="sm" variant="brand" className="mt-2.5 w-full" onClick={run} loading={!!progress}>
+        <Volume2 className="size-3.5" /> {progress ? `Recording ${progress}` : 'Pre-record teacher voice'}
+      </Button>
+      {result && <p className="mt-2 text-xs text-ink/70">{result}</p>}
     </div>
   )
 }
@@ -233,7 +293,7 @@ function CourseEditor({ course, count, onSaved }: { course?: Course; count: numb
           <Label>Order</Label>
           <Input type="number" value={c.order_index} onChange={(e) => setC({ ...c, order_index: Number(e.target.value) })} />
         </label>
-        <Toggle label="Published (visible to students)" checked={c.published} onChange={(v) => setC({ ...c, published: v })} />
+        <Toggle label="Published (course visible)" checked={c.published} onChange={(v) => setC({ ...c, published: v })} />
       </div>
       <div className="mt-4">
         <ErrorNote>{error}</ErrorNote>
@@ -329,11 +389,13 @@ function LessonEditor({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
-  const [audioBusy, setAudioBusy] = useState<number | null>(null)
-  const [narrating, setNarrating] = useState<string | null>(null)
+  const [illustrating, setIllustrating] = useState<string | null>(null)
+  const [imageBusy, setImageBusy] = useState<number | null>(null)
+  const [reviews, setReviews] = useState<LessonReview[]>([])
 
   useEffect(() => {
     if (!lessonId) return
+    repo.listReviews(lessonId).then(setReviews)
     repo.getLessonContent(lessonId).then((c) => {
       if (!c) return
       setDraft({
@@ -369,23 +431,26 @@ function LessonEditor({
     }
   }
 
-  // Narrates every saved segment that has no audio yet (already-narrated ones are skipped, so nothing is billed twice).
-  const pendingAudio = draft.segments.filter((s) => s.id && s.content.trim() && !s.audio_url)
-  const narrateAll = async () => {
+  // Illustrates every saved segment without an image (one-time cost per segment).
+  const pendingImages = draft.segments.filter((s) => s.id && s.content.trim() && !s.image_url)
+  const illustrate = async (segmentId: string) => {
+    const url = await generateSegmentImage(segmentId)
+    setDraft((d) => d && { ...d, segments: d.segments.map((x) => (x.id === segmentId ? { ...x, image_url: url } : x)) })
+  }
+  const illustrateAll = async () => {
     setError('')
     let done = 0
-    for (const s of pendingAudio) {
-      setNarrating(`${done + 1}/${pendingAudio.length}`)
+    for (const s of pendingImages) {
+      setIllustrating(`${done + 1}/${pendingImages.length}`)
       try {
-        const url = await generateSegmentAudio(s.id!, `${s.title}. ${s.content}`)
-        setDraft((d) => d && { ...d, segments: d.segments.map((x) => (x.id === s.id ? { ...x, audio_url: url } : x)) })
+        await illustrate(s.id!)
         done++
       } catch (e) {
-        setError(`Stopped after ${done} segment(s): ${errorMessage(e)}`)
+        setError(`Stopped after ${done} image(s): ${errorMessage(e)}`)
         break
       }
     }
-    setNarrating(null)
+    setIllustrating(null)
   }
 
   return (
@@ -407,7 +472,14 @@ function LessonEditor({
               <Trash2 className="size-4" />
             </Button>
           )}
-          <Button onClick={save} loading={busy} disabled={!draft.lesson.title.trim()}>
+          <Button
+            onClick={() => {
+              if (draft.lesson.validated_at && !confirm('This lesson is validated. Saving changes sends it back for teacher validation and hides it from students until then. Continue?')) return
+              void save()
+            }}
+            loading={busy}
+            disabled={!draft.lesson.title.trim()}
+          >
             <Save className="size-4" /> Save lesson
           </Button>
         </EditorHeader>
@@ -437,22 +509,52 @@ function LessonEditor({
             <Label hint="Position in module">Order</Label>
             <Input type="number" value={draft.lesson.order_index} onChange={(e) => setLesson({ order_index: Number(e.target.value) })} />
           </label>
-          <Toggle label="Published (visible to students)" checked={draft.lesson.published} onChange={(v) => setLesson({ published: v })} />
+          <Toggle
+            label="Submitted for teacher review"
+            checked={draft.lesson.published}
+            onChange={(v) => setLesson({ published: v })}
+          />
         </div>
       </Card>
 
+      {lessonId && (
+        <Card>
+          <EditorHeader
+            title="Teacher validation"
+            subtitle="Students see a lesson only after a teacher validates it. Saving any change sends it back for validation."
+          />
+          {draft.lesson.validated_at ? (
+            <ValidatedBadge lesson={draft.lesson as Lesson} />
+          ) : (
+            <p className="rounded-2xl bg-soft p-3.5 text-sm text-muted">
+              {draft.lesson.published ? 'Waiting for a teacher to validate — not visible to students yet.' : 'Draft — switch on "Submitted for teacher review" and save to send it to teachers.'}
+            </p>
+          )}
+          <p className="mt-5 mb-2 text-sm font-semibold">
+            Improvement requests {reviews.some((r) => r.status === 'open') && <Pill tone="warn">{reviews.filter((r) => r.status === 'open').length} open</Pill>}
+          </p>
+          <ReviewList
+            reviews={reviews}
+            onResolve={async (id) => {
+              await repo.resolveReview(id)
+              setReviews(await repo.listReviews(lessonId))
+            }}
+          />
+        </Card>
+      )}
+
       <Card>
         <EditorHeader title="Recorded segments" subtitle="Played in order. Check-in points pause to ask the student if they understood.">
-          {canGenerateAudio && (
+          {canGenerateImages && (
             <Button
-              variant="lime"
-              onClick={narrateAll}
-              loading={!!narrating}
-              disabled={!pendingAudio.length}
-              title={pendingAudio.length ? 'Generate AI narration for saved segments without audio' : 'Every saved segment already has audio'}
+              variant="brand"
+              onClick={illustrateAll}
+              loading={!!illustrating}
+              disabled={!pendingImages.length}
+              title={pendingImages.length ? 'Create illustrations (no people or faces) for saved segments without one' : 'Every saved segment already has an image'}
             >
-              <Volume2 className="size-4" />
-              {narrating ? `Narrating ${narrating}` : `Narrate all (${pendingAudio.length})`}
+              <ImagePlus className="size-4" />
+              {illustrating ? `Illustrating ${illustrating}` : `Illustrate all (${pendingImages.length})`}
             </Button>
           )}
           <Button
@@ -467,6 +569,11 @@ function LessonEditor({
             <Plus className="size-4" /> Segment
           </Button>
         </EditorHeader>
+        {error && (
+          <div className="mb-3">
+            <ErrorNote>{error}</ErrorNote>
+          </div>
+        )}
         <div className="space-y-3">
           {draft.segments.map((s, i) => {
             const update = (patch: Partial<typeof s>) => setDraft({ ...draft, segments: draft.segments.map((x, k) => (k === i ? { ...x, ...patch } : x)) })
@@ -495,34 +602,48 @@ function LessonEditor({
                   <Input
                     value={s.audio_url ?? ''}
                     onChange={(e) => update({ audio_url: e.target.value || null })}
-                    placeholder="Recorded audio URL (optional)"
+                    placeholder="Human recording URL (optional — replaces the AI voice for this part)"
                     className="h-9 min-w-56 flex-1"
                   />
-                  {canGenerateAudio && (
+                  {s.audio_url && <audio src={s.audio_url} controls className="h-9" />}
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  {s.image_url ? (
+                    <img src={s.image_url} alt="" className="h-16 w-24 shrink-0 rounded-lg object-cover" />
+                  ) : (
+                    <span className="grid h-16 w-24 shrink-0 place-items-center rounded-lg bg-soft text-subtle">
+                      <ImagePlus className="size-5" />
+                    </span>
+                  )}
+                  <Input
+                    value={s.image_url ?? ''}
+                    onChange={(e) => update({ image_url: e.target.value || null })}
+                    placeholder="Illustration URL (optional)"
+                    className="h-9 min-w-56 flex-1"
+                  />
+                  {canGenerateImages && (
                     <Button
                       size="sm"
                       variant="outline"
                       className="h-9"
                       disabled={!s.id || !s.content.trim()}
-                      title={s.id ? 'Generate narration with the AI voice' : 'Save the lesson first'}
-                      loading={audioBusy === i}
+                      title={s.id ? 'Create an illustration (no people or faces)' : 'Save the lesson first'}
+                      loading={imageBusy === i}
                       onClick={async () => {
-                        setAudioBusy(i)
+                        setImageBusy(i)
                         setError('')
                         try {
-                          const url = await generateSegmentAudio(s.id!, `${s.title}. ${s.content}`)
-                          update({ audio_url: url })
+                          await illustrate(s.id!)
                         } catch (e) {
                           setError(errorMessage(e))
                         } finally {
-                          setAudioBusy(null)
+                          setImageBusy(null)
                         }
                       }}
                     >
-                      <Volume2 className="size-3.5" /> Generate audio
+                      <ImagePlus className="size-3.5" /> {s.image_url ? 'Regenerate image' : 'Generate image'}
                     </Button>
                   )}
-                  {s.audio_url && <audio src={s.audio_url} controls className="h-9" />}
                 </div>
               </div>
             )
@@ -781,3 +902,72 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   )
 }
 
+
+/** Admins give accounts the Teacher (or Admin) role. People sign up normally first. */
+function TeamCard() {
+  const [staff, setStaff] = useState<Profile[]>([])
+  const [email, setEmail] = useState('')
+  const [role, setRole] = useState<Profile['role']>('teacher')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => setStaff(await repo.listStaff()), [])
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const save = async (targetEmail: string, targetRole: Profile['role']) => {
+    setBusy(true)
+    setError('')
+    try {
+      await repo.setUserRole(targetEmail, targetRole)
+      setEmail('')
+      await load()
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-6 border-t border-dashed border-dash pt-4">
+      <p className="text-sm font-semibold">Teachers & admins</p>
+      <p className="text-xs text-muted">Teachers validate lessons in their own Lesson review portal.</p>
+      <ul className="mt-3 space-y-1.5">
+        {staff.map((p) => (
+          <li key={p.id} className="flex items-center gap-2 text-sm">
+            <span className="min-w-0 flex-1 truncate" title={p.email ?? ''}>
+              {p.full_name || p.email}
+            </span>
+            <Pill tone={p.role === 'admin' ? 'ink' : 'brand'}>{p.role}</Pill>
+            {p.role === 'teacher' && p.email && (
+              <button onClick={() => save(p.email!, 'student')} className="text-xs text-muted hover:text-danger" title="Remove teacher role">
+                <X className="size-3.5" />
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <form
+        className="mt-3 flex flex-col gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (email.trim()) void save(email.trim(), role)
+        }}
+      >
+        <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Their account email" className="h-9" />
+        <div className="flex gap-2">
+          <Select value={role} onChange={(e) => setRole(e.target.value as Profile['role'])} className="h-9 w-28">
+            <option value="teacher">Teacher</option>
+            <option value="admin">Admin</option>
+          </Select>
+          <Button type="submit" size="sm" className="h-9 flex-1" loading={busy} disabled={!email.trim()}>
+            <Plus className="size-3.5" /> Add
+          </Button>
+        </div>
+        <ErrorNote>{error}</ErrorNote>
+      </form>
+    </div>
+  )
+}

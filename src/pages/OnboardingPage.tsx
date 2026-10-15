@@ -27,6 +27,7 @@ export function OnboardingPage() {
   const [step, setStep] = useState(0)
   const [name, setName] = useState(profile?.full_name ?? '')
   const [age, setAge] = useState<string>(profile?.age ? String(profile.age) : '')
+  const [gender, setGender] = useState<'female' | 'male' | null>(profile?.gender ?? null)
   const [country, setCountry] = useState(profile?.country ?? '')
   const [language, setLanguage] = useState(profile?.language ?? 'en')
   const [level, setLevel] = useState<Level | null>(profile?.level ?? null)
@@ -36,7 +37,7 @@ export function OnboardingPage() {
 
   const ageNum = age ? Number(age) : null
   const suggested = suggestLevel(ageNum)
-  const canNext = [name.trim() && ageNum && ageNum >= 3 && ageNum <= 120 && country && language, !!level, courses.length > 0][step]
+  const canNext = [name.trim() && ageNum && ageNum >= 3 && ageNum <= 120 && gender && country && language, !!level, courses.length > 0][step]
 
   const finish = async () => {
     if (!user || !level) return
@@ -46,6 +47,7 @@ export function OnboardingPage() {
       const updated = await repo.updateProfile(user.id, {
         full_name: name.trim(),
         age: ageNum,
+        gender,
         country,
         language,
         level,
@@ -98,6 +100,10 @@ export function OnboardingPage() {
                     <Label>Your name</Label>
                     <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="What should the teacher call you?" />
                   </label>
+                  <div className="sm:col-span-2">
+                    <Label hint="Your teacher's voice will match">I am a…</Label>
+                    <GenderPicker value={gender} onChange={setGender} adult={!!ageNum && ageNum >= 18} />
+                  </div>
                   <label className="block">
                     <Label>Age</Label>
                     <Input type="number" min={3} max={120} value={age} onChange={(e) => setAge(e.target.value)} placeholder="e.g. 11" />
@@ -234,6 +240,42 @@ export function OnboardingPage() {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+/** Girl / boy choice — the teacher's voice matches (female → Jessica, male → Will). */
+export function GenderPicker({
+  value,
+  onChange,
+  adult,
+}: {
+  value: 'female' | 'male' | null
+  onChange: (v: 'female' | 'male') => void
+  adult?: boolean
+}) {
+  const options = [
+    { id: 'female' as const, label: adult ? 'Woman' : 'Girl', teacher: 'Jessica' },
+    { id: 'male' as const, label: adult ? 'Man' : 'Boy', teacher: 'Will' },
+  ]
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          onClick={() => onChange(o.id)}
+          className={cn(
+            'flex items-center gap-3 rounded-2xl border p-3.5 text-left transition',
+            value === o.id ? 'border-ink bg-ink text-white' : 'border-dashed border-dash hover:border-ink/40',
+          )}
+        >
+          <span className="min-w-0">
+            <span className="block font-medium">{o.label}</span>
+            <span className={cn('block text-xs', value === o.id ? 'text-white/60' : 'text-muted')}>Teacher voice: {o.teacher}</span>
+          </span>
+        </button>
+      ))}
     </div>
   )
 }

@@ -10,6 +10,7 @@ import type {
   Enrollment,
   Lesson,
   LessonProgress,
+  LessonReview,
   MissedQuestion,
   Module,
   Profile,
@@ -45,6 +46,7 @@ interface DemoDb {
   reflections: Reflection[]
   history: QuestionHistory[]
   activity: ActivityDay[]
+  reviews?: LessonReview[]
 }
 
 function freshDb(): DemoDb {
@@ -52,7 +54,7 @@ function freshDb(): DemoDb {
     users: [],
     session: null,
     profiles: [],
-    ...buildSeedRows(),
+    ...demoSeed(),
     enrollments: [],
     progress: [],
     attempts: [],
@@ -61,6 +63,14 @@ function freshDb(): DemoDb {
     history: [],
     activity: [],
   }
+}
+
+/** Demo data only: sample lessons arrive pre-validated so the student flow can be tried immediately. */
+function demoSeed() {
+  const rows = buildSeedRows()
+  const at = stamp()
+  rows.lessons = rows.lessons.map((l) => ({ ...l, validated_at: at, validated_by: null, validated_by_name: 'Demo reviewer', validated_by_title: 'Sample data — not a real validation' }))
+  return rows
 }
 
 let cache: DemoDb | null = null
@@ -82,6 +92,13 @@ function commit() {
   } catch {
     /* storage full or blocked — keep in memory */
   }
+}
+
+/** Demo only: switch the signed-in account's role to try the student, teacher and admin views. */
+export function setDemoRole(role: Profile['role']) {
+  const p = db().profiles.find((x) => x.id === db().session)
+  if (p) p.role = role
+  commit()
 }
 
 export function resetDemoDb() {
@@ -176,15 +193,16 @@ export const localRepo: Repo = {
     return { ...p }
   },
 
-  async getCatalog(includeUnpublished = false) {
+  async getCatalog(audience = 'student') {
     const d = db()
-    const courses = d.courses.filter((c) => includeUnpublished || c.published).sort((a, b) => a.order_index - b.order_index)
+    const all = audience === 'admin'
+    const courses = d.courses.filter((c) => all || c.published).sort((a, b) => a.order_index - b.order_index)
     const ids = new Set(courses.map((c) => c.id))
     return {
       courses,
       modules: d.modules.filter((m) => ids.has(m.course_id)).sort((a, b) => a.order_index - b.order_index),
       lessons: d.lessons
-        .filter((l) => ids.has(l.course_id) && (includeUnpublished || l.published))
+        .filter((l) => ids.has(l.course_id) && (all || (l.published && (audience === 'teacher' || !!l.validated_at))))
         .sort((a, b) => a.order_index - b.order_index),
     }
   },
@@ -334,7 +352,8 @@ export const localRepo: Repo = {
   async saveLesson(draft) {
     const d = db()
     const id = draft.lesson.id ?? uid()
-    const lesson = { ...draft.lesson, id } as Lesson
+    // Editing sends the lesson back for teacher validation.
+    const lesson = { ...draft.lesson, id, validated_at: null, validated_by: null, validated_by_name: null, validated_by_title: null } as Lesson
     const idx = d.lessons.findIndex((l) => l.id === id)
     if (idx >= 0) d.lessons[idx] = lesson
     else d.lessons.push(lesson)
@@ -355,6 +374,43 @@ export const localRepo: Repo = {
     d.references = d.references.filter((r) => r.lesson_id !== id)
     d.questions = d.questions.filter((q) => q.lesson_id !== id)
     commit()
+  },
+  async validateLesson(lessonId) {
+    await tick()
+    const me = db().profiles.find((p) => p.id === db().session)
+    if (me?.role !== 'teacher') throw new Error('Only teachers can validate lessons')
+    const l = db().lessons.find((x) => x.id === lessonId)
+    if (!l || !l.published) throw new Error('Lesson not found or not submitted for review')
+    if (l.validated_at) throw new Error('This lesson has already been validated')
+    Object.assign(l, { validated_at: stamp(), validated_by: me.id, validated_by_name: me.full_name, validated_by_title: me.teacher_title ?? null })
+    commit()
+  },
+  async listReviews(lessonId) {
+    return (db().reviews ?? [])
+      .filter((r) => !lessonId || r.lesson_id === lessonId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+  },
+  async requestImprovement(lessonId, location, comment) {
+    const me = db().profiles.find((p) => p.id === db().session)
+    if (me?.role !== 'teacher') throw new Error('Only teachers can request improvements')
+    db().reviews ??= []
+    db().reviews!.push({ id: uid(), lesson_id: lessonId, teacher_id: me.id, teacher_name: me.full_name, location, comment, status: 'open', created_at: stamp(), resolved_at: null })
+    commit()
+  },
+  async resolveReview(reviewId) {
+    const r = (db().reviews ?? []).find((x) => x.id === reviewId)
+    if (r) Object.assign(r, { status: 'resolved', resolved_at: stamp() })
+    commit()
+  },
+  async setUserRole(email, role) {
+    const p = db().profiles.find((x) => x.email === email.trim().toLowerCase())
+    if (!p) throw new Error(`No account with email ${email} — they need to sign up first`)
+    p.role = role
+    commit()
+    return { ...p }
+  },
+  async listStaff() {
+    return db().profiles.filter((p) => p.role === 'teacher' || p.role === 'admin')
   },
   async setSegmentAudio(segmentId, audioUrl) {
     const s = db().segments.find((x) => x.id === segmentId)

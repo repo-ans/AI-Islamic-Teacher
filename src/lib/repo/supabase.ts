@@ -1,6 +1,6 @@
 import type { PostgrestError } from '@supabase/supabase-js'
 import { requireSupabase } from '../supabase'
-import type { Course, LearnerState, Lesson, Module, Profile, QuizQuestion, Reference, Segment } from '../types'
+import type { Course, LearnerState, Lesson, LessonReview, Module, Profile, QuizQuestion, Reference, Segment } from '../types'
 import type { Repo } from './types'
 
 const sb = () => requireSupabase()
@@ -62,16 +62,20 @@ export const supabaseRepo: Repo = {
     return check(await sb().from('profiles').update(patch).eq('id', userId).select('*').single()) as Profile
   },
 
-  async getCatalog(includeUnpublished = false) {
+  async getCatalog(audience = 'student') {
     let courses = sb().from('courses').select('*').order('order_index')
     let lessons = sb()
       .from('lessons')
-      .select('id,course_id,module_id,title,description,objectives,est_minutes,order_index,published')
+      .select(
+        'id,course_id,module_id,title,description,objectives,est_minutes,order_index,published,validated_at,validated_by,validated_by_name,validated_by_title',
+      )
       .order('order_index')
-    if (!includeUnpublished) {
+    if (audience !== 'admin') {
       courses = courses.eq('published', true)
       lessons = lessons.eq('published', true)
     }
+    // RLS already hides unvalidated lessons from students; staff browsing as learners get the same view.
+    if (audience === 'student') lessons = lessons.not('validated_at', 'is', null)
     const [c, m, l] = await Promise.all([courses, sb().from('modules').select('*').order('order_index'), lessons])
     return {
       courses: check(c) as Course[],
@@ -209,5 +213,27 @@ export const supabaseRepo: Repo = {
   },
   async setSegmentAudio(segmentId, audioUrl) {
     check(await sb().from('lesson_segments').update({ audio_url: audioUrl }).eq('id', segmentId))
+  },
+
+  async validateLesson(lessonId) {
+    check(await sb().rpc('validate_lesson', { p_lesson_id: lessonId }))
+  },
+  async listReviews(lessonId) {
+    let q = sb().from('lesson_reviews').select('*').order('created_at', { ascending: false })
+    if (lessonId) q = q.eq('lesson_id', lessonId)
+    return check(await q) as LessonReview[]
+  },
+  async requestImprovement(lessonId, location, comment) {
+    // teacher_id / teacher_name are stamped by a database trigger.
+    check(await sb().from('lesson_reviews').insert({ lesson_id: lessonId, location, comment }))
+  },
+  async resolveReview(reviewId) {
+    check(await sb().from('lesson_reviews').update({ status: 'resolved', resolved_at: new Date().toISOString() }).eq('id', reviewId))
+  },
+  async setUserRole(email, role) {
+    return check(await sb().rpc('set_user_role', { p_email: email, p_role: role })) as Profile
+  },
+  async listStaff() {
+    return check(await sb().from('profiles').select('*').in('role', ['teacher', 'admin']).order('full_name')) as Profile[]
   },
 }

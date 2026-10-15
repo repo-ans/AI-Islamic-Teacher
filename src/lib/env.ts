@@ -6,13 +6,7 @@ export const DEMO_MODE =
   import.meta.env.VITE_DEMO_MODE === 'true' || !SUPABASE_URL || !SUPABASE_ANON_KEY
 
 /**
- * The `tts` edge function (ElevenLabs / Azure) is deployed: admins can narrate
- * segments once and store the MP3, which every student then replays for free.
+ * The `tts` edge function (ElevenLabs / Azure) is deployed: the whole teacher
+ * speaks in that voice. Audio is cached server-side, so each sentence is billed once.
  */
 export const TTS_ENABLED = !DEMO_MODE && import.meta.env.VITE_TTS_ENABLED === 'true'
-
-/**
- * Also synthesise segments that have no stored audio live, per student.
- * Off by default: it bills the TTS provider for every play.
- */
-export const TTS_LIVE = TTS_ENABLED && import.meta.env.VITE_TTS_LIVE === 'true'

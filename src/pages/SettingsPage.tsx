@@ -6,17 +6,20 @@ import { dayOffset, formatDay, now, setDayOffset } from '../lib/clock'
 import { DEMO_MODE, TTS_ENABLED } from '../lib/env'
 import { COUNTRIES, LANGUAGES, LEVELS } from '../lib/levels'
 import { repo } from '../lib/repo'
-import { resetDemoDb } from '../lib/repo/local'
+import { resetDemoDb, setDemoRole } from '../lib/repo/local'
 import type { Level } from '../lib/types'
 import { errorMessage } from '../lib/utils'
+import { GenderPicker } from './OnboardingPage'
 
 export function SettingsPage() {
   const { user, profile, setProfile } = useAuth()
   const [name, setName] = useState(profile?.full_name ?? '')
   const [age, setAge] = useState(profile?.age ? String(profile.age) : '')
   const [level, setLevel] = useState<Level>(profile?.level ?? 'adult')
+  const [gender, setGender] = useState<'female' | 'male' | null>(profile?.gender ?? null)
   const [language, setLanguage] = useState(profile?.language ?? 'en')
   const [country, setCountry] = useState(profile?.country ?? '')
+  const [teacherTitle, setTeacherTitle] = useState(profile?.teacher_title ?? '')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
@@ -28,7 +31,15 @@ export function SettingsPage() {
     setError('')
     setSaved(false)
     try {
-      const p = await repo.updateProfile(user.id, { full_name: name.trim(), age: age ? Number(age) : null, level, language, country })
+      const p = await repo.updateProfile(user.id, {
+        full_name: name.trim(),
+        age: age ? Number(age) : null,
+        gender,
+        level,
+        language,
+        country,
+        ...(profile.role === 'teacher' ? { teacher_title: teacherTitle.trim() || null } : {}),
+      })
       setProfile(p)
       setSaved(true)
     } catch (e) {
@@ -60,6 +71,10 @@ export function SettingsPage() {
               ))}
             </Select>
           </label>
+          <div className="sm:col-span-2">
+            <Label hint="Your teacher's voice matches">I am a…</Label>
+            <GenderPicker value={gender} onChange={setGender} adult={!!age && Number(age) >= 18} />
+          </div>
           <label className="block">
             <Label>Level</Label>
             <Select value={level} onChange={(e) => setLevel(e.target.value as Level)}>
@@ -80,6 +95,12 @@ export function SettingsPage() {
               ))}
             </Select>
           </label>
+          {profile.role === 'teacher' && (
+            <label className="block sm:col-span-2">
+              <Label hint="Shown to students next to your name on lessons you validate">Your title / qualification</Label>
+              <Input value={teacherTitle} onChange={(e) => setTeacherTitle(e.target.value)} placeholder="e.g. Alim, Darul Uloom Dhaka" />
+            </label>
+          )}
         </div>
         <div className="mt-6 flex items-center gap-3">
           <Button onClick={save} loading={saving}>
@@ -114,6 +135,20 @@ export function SettingsPage() {
         {DEMO_MODE && (
           <Card>
             <SectionTitle title="Demo tools" subtitle="Only available in demo mode." />
+            <div className="mb-4">
+              <Label>View the app as</Label>
+              <Select
+                value={profile.role}
+                onChange={(e) => {
+                  setDemoRole(e.target.value as typeof profile.role)
+                  location.reload()
+                }}
+              >
+                <option value="student">Student</option>
+                <option value="teacher">Teacher</option>
+                <option value="admin">Admin</option>
+              </Select>
+            </div>
             <p className="text-sm text-muted">
               App date: <span className="font-medium text-ink">{formatDay(now())}</span>
               {dayOffset() > 0 && ` (+${dayOffset()} day${dayOffset() > 1 ? 's' : ''})`}
